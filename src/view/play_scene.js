@@ -25,7 +25,6 @@
  ****************************************************************************/
 
 define(function(require, exports, module){
-
     var layers = require('cqwrap/layers'),
         BaseScene = require('cqwrap/scenes').BaseScene;
     var GameLayer = layers.GameLayer, BgLayer = layers.BgLayer;
@@ -33,6 +32,14 @@ define(function(require, exports, module){
 
     var UserData = require('cqwrap/data').UserData;
     var Audio = require('cqwrap/audio');
+            
+    // 当前玩家的服务器 id
+    var socketId;
+    var socket = io.connect('http://localhost:8080');
+    socket.on('getId', function(data) {
+        console.log(data);
+        socketId = data.id;
+    });
 
     var MyLayer = GameLayer.extend({
 
@@ -47,7 +54,7 @@ define(function(require, exports, module){
                 xy: [0, 0],
                 zOrder: 3
             });
-
+    
             ground.moveBy(0.5, cc.p(-120, 0)).moveBy(0, cc.p(120, 0)).repeatAll().act();
 
             this.addChild(ground);
@@ -95,11 +102,21 @@ define(function(require, exports, module){
 
             self.hoses = [];
 
+            // 所有鸟的 sprite 实例
+            var birdsListSprite = {};
+            
+            // 当前屏幕左侧相对于游戏起始点的位置
+            var offsetX = 0;
+            var offsetTimer;
+            
+            // 全局的移动速度
+            var speed = 0;
+
             function createHose(dis){
-                var hoseHeight = 830;
-                var acrossHeight = 250;
+                // var hoseHeight = 830;
+                var acrossHeight = 300;
                 var downHeight = 200 + (400 * Math.random() | 0);
-                var upHeight = 1000 - downHeight - acrossHeight;
+                // var upHeight = 1000 - downHeight - acrossHeight;
                 
                 var n = (self.hoses.length / 2) | 0;
                 var hoseX = dis + 400 * n;
@@ -117,7 +134,7 @@ define(function(require, exports, module){
                 self.addChild(hoseDown);
                 self.addChild(hoseUp);
 
-                var moveByDis = hoseX+500;
+                var moveByDis = hoseX + 500;
                 hoseUp.moveBy(moveByDis/200, cc.p(-moveByDis, 0)).then(function(){
                     hoseUp.removeFromParent(true);
                 }).act();
@@ -128,24 +145,51 @@ define(function(require, exports, module){
                     self.scoreBuf ++;
                     hoseDown.removeFromParent(true);
                 }).act();
-
+                speed = moveByDis / (moveByDis / 200);
                 self.hoses.push(hoseDown, hoseUp);
-                
-            };
+            }
+
+            function createBird(data) {
+                birdsListSprite[data.id] = cc.createSprite('bird1.png', {
+                    anchor: [0.5, 0],
+                    xy: [data.x, data.y],
+                    zOrder: 2
+                })
+                .animate(0.2, 'bird1.png', 'bird2.png', 'bird3.png')
+                .repeat()
+                .act();
+            }
+
+            function recordOffsetX() {
+                offsetTimer = setInterval(function() {
+                    offsetX += speed;
+                    console.log(offsetX);
+                }, 1000);
+            }
+            
+            function stopRecordOffsetX() {
+                clearInterval(offsetTimer);
+            }
 
             this.scoreBuf = 0;
             this.score = 0;
 
-            this.on('touchstart', function(){
+            this.on('touchstart', function() {
                 //cc.log('bird:', bird.getBoundingBox());
-                Audio.playEffect('audio/sfx_wing.ogg')
+                Audio.playEffect('audio/sfx_wing.ogg');
                 if(self.status == 'ready'){
+
+                    socket.on('update', function(data) {
+                        console.log(data);
+                    });
+                    
                     for(var i = 0; i < 4; i++){
                         createHose(1200);
                     }
 
                     ready.fadeOut(0.5).act();
                     start.fadeOut(0.5).act();
+                    recordOffsetX();
 
                     //碰撞检测
                     self.checker = self.setInterval(function(){
@@ -169,9 +213,9 @@ define(function(require, exports, module){
                             if(hose.getPositionX() > 0 && hose.getPositionX() < 720
                                 //&& cc.rectIntersectsRect(hose.getBoundingBox(), bird.getBoundingBox())
                                 && (cc.rectContainsPoint(box, left)
-                                    || cc.rectContainsPoint(box, right)
-                                    || cc.rectContainsPoint(box, top)
-                                    || cc.rectContainsPoint(box, bottom))){
+                                || cc.rectContainsPoint(box, right)
+                                || cc.rectContainsPoint(box, top)
+                                || cc.rectContainsPoint(box, bottom))){
                                 //cc.log([hose.getBoundingBox(), bird.getBoundingBox()]);
                                 layerMask.fadeIn(0.1).fadeOut(0.1).act();
                                 Audio.playEffect('audio/sfx_hit.ogg');
@@ -181,6 +225,7 @@ define(function(require, exports, module){
                         });
 
                         if(self.status == 'falling'){
+                            stopRecordOffsetX();
                             self.clearInterval(self.checker);
                             ground.stopAllActions();
                             
@@ -198,7 +243,7 @@ define(function(require, exports, module){
                             Audio.playEffect('audio/sfx_point.ogg');
                         }
 
-                    }, 50)
+                    }, 50);
 
                     self.status = 'playing';
                 }
@@ -212,7 +257,6 @@ define(function(require, exports, module){
 
                     var jumpHeight = Math.min(1280 - birdY, 120);
                     bird.moveBy(0.2, cc.p(0, jumpHeight), cc.EaseOut, 2).act();
-
                     bird.rotateTo(0.2, -20).act();
                     bird.delay(0.2).moveTo(fallTime, cc.p(birdX, 316), cc.EaseIn, 2)
                         .then(function(){
@@ -232,13 +276,13 @@ define(function(require, exports, module){
                             
                             setTimeout(function(){
                                 self.onGameOver();
-                            }, 200)
+                            }, 200);
                         }).act();
-                    bird.delay(0.5).rotateTo(fallTime - 0.3, 90, 0, cc.EaseIn, 2).act();                    
+                    bird.delay(0.5).rotateTo(fallTime - 0.3, 90, 0, cc.EaseIn, 2).act();                
                 }
             });
 
-            var label = cc.createSprite('@@75team', {
+            var label = cc.createSprite('@@75team   @JS小组', {
                 anchor: [0.5, 0.5],
                 xy: [360, 180],
                 fontSize: 54,
@@ -246,7 +290,7 @@ define(function(require, exports, module){
                 color: '#000'
             });
 
-            this.addChild(label);
+            // this.addChild(label);
 
             var layerMask = cc.LayerColor.create(cc.c4b(255,255,255, 255));
             layerMask.setZOrder(88);
@@ -271,7 +315,7 @@ define(function(require, exports, module){
                 UserData.set('best', bestScore);
             }
 
-            var bestScore = cc.createSprite('@'+bestScore, {
+            bestScore = cc.createSprite('@'+bestScore, {
                 anchor: [0.5, 0],
                 xy: [550, 555],
                 fontSize: 64,
@@ -345,7 +389,6 @@ define(function(require, exports, module){
     var MyScene = BaseScene.extend({
         init:function () {
             this._super();
-
             var bg = new BgLayer("res/bg.png");
             this.addChild(bg);
 

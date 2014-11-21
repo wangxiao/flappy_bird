@@ -26,7 +26,6 @@
  ****************************************************************************/
 (function () {
     window.global = window;
-    
     var d = document;
     var c = {
         COCOS2D_DEBUG:2, //0 to turn debug off, 1 for basic debug, and 2 for full debug
